@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package ameoba.v1;
+
+option python_package = "ameoba.api.grpc.generated.ameoba.v1";
+
+// QueryService: execute federated SQL queries.
+service QueryService {
+  // Execute a query and stream result rows back.
+  rpc Execute(QueryRequest) returns (stream QueryRow);
+}
+
+message QueryRequest {
+  string sql = 1;
+  string tenant_id = 2;
+  int32  max_rows = 3;
+}
+
+message QueryRow {
+  // First message is schema (has columns, no values).
+  // Subsequent messages are data rows (has values, no columns).
+  repeated string columns = 1;
+  repeated string values = 2;   // JSON-encoded cell values
+  bool is_schema = 3;
+  int64 row_count = 4;
+  double execution_ms = 5;
+}

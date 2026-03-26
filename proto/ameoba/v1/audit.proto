@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package ameoba.v1;
+
+option python_package = "ameoba.api.grpc.generated.ameoba.v1";
+
+// AuditService: stream and verify audit events.
+service AuditService {
+  // Stream events in sequence order.
+  rpc Tail(AuditTailRequest) returns (stream AuditEventProto);
+
+  // Verify ledger integrity and return the Merkle root.
+  rpc Verify(AuditVerifyRequest) returns (AuditVerifyResponse);
+}
+
+message AuditTailRequest {
+  int64  after_sequence = 1;
+  int32  limit = 2;
+  string tenant_id = 3;
+}
+
+message AuditEventProto {
+  string id = 1;
+  int64  sequence = 2;
+  string kind = 3;
+  string occurred_at = 4;
+  string agent_id = 5;
+  string tenant_id = 6;
+  string record_id = 7;
+  string collection = 8;
+  string backend_id = 9;
+  string event_hash = 10;
+  string previous_hash = 11;
+  string detail_json = 12;
+}
+
+message AuditVerifyRequest {}
+
+message AuditVerifyResponse {
+  bool   ok = 1;
+  string detail = 2;
+  string root_hash = 3;
+  int64  sequence = 4;
+}
