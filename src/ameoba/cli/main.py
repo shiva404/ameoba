@@ -17,6 +17,7 @@ from ameoba.cli.commands.audit import app as audit_app
 from ameoba.cli.commands.backend import app as backend_app
 from ameoba.cli.commands.ingest import app as ingest_app
 from ameoba.cli.commands.query import app as query_app
+from ameoba.cli.commands.runners import app as runners_app
 from ameoba.cli.commands.serve import app as serve_app
 
 app = typer.Typer(
@@ -31,6 +32,7 @@ app.add_typer(query_app, name="query")
 app.add_typer(audit_app, name="audit")
 app.add_typer(serve_app, name="serve")
 app.add_typer(backend_app, name="backend")
+app.add_typer(runners_app, name="runners")
 
 
 @app.command("version")

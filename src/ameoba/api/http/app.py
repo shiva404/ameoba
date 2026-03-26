@@ -15,7 +15,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ameoba.api.http.routers import audit, health, ingest, query, schema
+from ameoba.api.http.routers import audit, debug, health, ingest, query, schema
 from ameoba.config import Settings, settings as default_settings
 from ameoba.kernel.kernel import AmeobaKernel
 from ameoba.observability.logging import configure_logging
@@ -91,5 +91,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(query.router)
     app.include_router(audit.router)
     app.include_router(schema.router)
+    app.include_router(debug.router)
 
     return app

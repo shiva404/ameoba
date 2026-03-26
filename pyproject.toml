@@ -86,8 +86,6 @@ packages = ["src/ameoba"]
 line-length = 100
 src = ["src"]
 target-version = "py311"
-
-[tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
 ignore = ["ANN101", "ANN102", "ANN401"]
 
