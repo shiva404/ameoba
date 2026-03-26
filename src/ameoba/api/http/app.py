@@ -15,7 +15,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ameoba.api.http.routers import audit, debug, health, ingest, query, schema
+from ameoba.api.http.routers import audit, catalog, debug, health, ingest, query, schema
 from ameoba.config import Settings, settings as default_settings
 from ameoba.kernel.kernel import AmeobaKernel
 from ameoba.observability.logging import configure_logging
@@ -78,7 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             from ameoba.security.authn.oauth2 import JWTValidator
             jwt_validator = JWTValidator(
-                secret_or_key=cfg.auth.jwt_secret,
+                secret_or_pubkey=cfg.auth.jwt_secret,
                 algorithm=cfg.auth.jwt_algorithm,
             )
         except ImportError:
@@ -91,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(query.router)
     app.include_router(audit.router)
     app.include_router(schema.router)
+    app.include_router(catalog.router)
     app.include_router(debug.router)
 
     return app

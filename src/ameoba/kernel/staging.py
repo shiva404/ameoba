@@ -12,7 +12,6 @@ Design decisions:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -163,3 +162,16 @@ class StagingBuffer:
         else:
             _, rows = await self._store._fetch("SELECT COUNT(*) FROM staging_buffer")
         return rows[0][0] if rows else 0
+
+    async def grouped_pending(self) -> list[dict[str, Any]]:
+        """Pending rows grouped by backend and collection (for catalog UI)."""
+        _, rows = await self._store._fetch(
+            """SELECT backend_id, collection, COUNT(*) AS pending_count
+               FROM staging_buffer
+               GROUP BY backend_id, collection
+               ORDER BY pending_count DESC"""
+        )
+        return [
+            {"backend_id": r[0], "collection": r[1], "pending_count": int(r[2])}
+            for r in rows
+        ]

@@ -67,6 +67,33 @@ class AuditLedger:
         self._merkle = MerkleTree()
         self._lock = asyncio.Lock()
 
+    async def hydrate(self) -> None:
+        """Restore sequence, hash chain tip, and Merkle state from the sink.
+
+        Must run after the sink is opened when ``audit.sqlite`` may already
+        contain events (e.g. process restart). Otherwise the in-memory
+        sequence resets to 0 and the next append collides on ``sequence``
+        (SQLite PRIMARY KEY).
+        """
+        if not hasattr(self._sink, "iter_events_ordered"):
+            return
+
+        events: list[AuditEvent] = []
+        async for event in self._sink.iter_events_ordered():  # type: ignore[attr-defined]
+            events.append(event)
+
+        async with self._lock:
+            self._sequence = 0
+            self._previous_hash = hashlib.sha256(b"genesis").hexdigest()
+            self._merkle = MerkleTree()
+            for event in events:
+                canonical = _canonical_bytes(event)
+                self._merkle.append(canonical)
+                if event.sequence is not None:
+                    self._sequence = event.sequence
+                if event.event_hash:
+                    self._previous_hash = event.event_hash
+
     async def record(
         self,
         kind: AuditEventKind,
@@ -159,6 +186,13 @@ class AuditLedger:
             after_sequence=after_sequence, limit=limit, tenant_id=tenant_id
         ):
             yield event
+
+    async def count_by_kind(self, *, tenant_id: str | None = None) -> dict[str, int]:
+        """Delegate to SQLite sink when available."""
+        fn = getattr(self._sink, "count_by_kind", None)
+        if callable(fn):
+            return await fn(tenant_id=tenant_id)  # type: ignore[misc]
+        return {}
 
     def get_inclusion_proof(self, index: int) -> list[str]:
         """Merkle inclusion proof for a leaf (by 0-based index = sequence - 1)."""

@@ -16,6 +16,7 @@ Directory layout::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import io
 from pathlib import Path
@@ -197,3 +198,56 @@ class LocalBlobStore:
         """Two-level directory structure to avoid inode pressure."""
         prefix = content_hash[:2]
         return self._root / prefix / content_hash
+
+    async def catalog_stats(
+        self,
+        *,
+        max_files: int = 5000,
+        sample_limit: int = 100,
+    ) -> dict[str, Any]:
+        """Bounded walk of the blob tree: counts, bytes, and sample hashes.
+
+        Stops after ``max_files`` files to keep the catalog endpoint cheap on
+        large stores; set ``truncated`` when the cap is hit.
+        """
+        root = self._root
+
+        def _scan() -> dict[str, Any]:
+            n = 0
+            total_bytes = 0
+            samples: list[str] = []
+            truncated = False
+            if not root.exists():
+                return {
+                    "files_scanned": 0,
+                    "truncated": False,
+                    "total_bytes": 0,
+                    "sample_hashes": [],
+                }
+            for sub in sorted(root.iterdir()):
+                if not sub.is_dir() or len(sub.name) != 2:
+                    continue
+                for f in sorted(sub.iterdir()):
+                    if not f.is_file():
+                        continue
+                    n += 1
+                    with contextlib.suppress(OSError):
+                        total_bytes += f.stat().st_size
+                    if len(samples) < sample_limit:
+                        samples.append(f.name)
+                    if n >= max_files:
+                        truncated = True
+                        return {
+                            "files_scanned": n,
+                            "truncated": truncated,
+                            "total_bytes": total_bytes,
+                            "sample_hashes": samples,
+                        }
+            return {
+                "files_scanned": n,
+                "truncated": truncated,
+                "total_bytes": total_bytes,
+                "sample_hashes": samples,
+            }
+
+        return await asyncio.get_event_loop().run_in_executor(None, _scan)

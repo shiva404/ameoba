@@ -1,0 +1,199 @@
+<script>
+  const snapshotOut = document.getElementById("snapshotOut");
+  const snapshotPipeline = document.getElementById("snapshotPipeline");
+  const traceJson = document.getElementById("traceJson");
+  const traceVisual = document.getElementById("traceVisual");
+  const e2eOut = document.getElementById("e2eOut");
+  const rawOut = document.getElementById("rawOut");
+  const relOut = document.getElementById("relOut");
+  const relCommitOut = document.getElementById("relCommitOut");
+
+  function setRaw(obj) {
+    rawOut.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  async function request(path, method = "GET", body = null) {
+    const opts = { method, headers: { "content-type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  }
+
+  function tabSwitch(name) {
+    document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll("section.panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
+  }
+  document.getElementById("tabs").addEventListener("click", (e) => {
+    if (e.target.dataset.tab) tabSwitch(e.target.dataset.tab);
+  });
+
+  async function loadSnapshot() {
+    const { data, status } = await request("/v1/debug/snapshot");
+    snapshotOut.textContent = JSON.stringify(data, null, 2);
+    setRaw({ snapshot_status: status, snapshot: data });
+    snapshotPipeline.innerHTML = "";
+    if (data.pipeline_stages) {
+      data.pipeline_stages.forEach((s) => {
+        const el = document.createElement("div");
+        el.className = "pipe-step";
+        el.innerHTML = "<strong>Step " + s.step + " · " + s.name + "</strong><span>" + s.description + "</span>";
+        snapshotPipeline.appendChild(el);
+      });
+    }
+  }
+
+  function renderTrace(data) {
+    traceJson.textContent = JSON.stringify(data, null, 2);
+    setRaw(data);
+    const c = data.classification;
+    const r = data.routing;
+    const s = data.storage;
+    let barsHtml = "";
+    if (c && c.scores_percent) {
+      barsHtml = '<div class="bars">';
+      Object.entries(c.scores_percent).forEach(([k, pct]) => {
+        barsHtml += '<div class="bar-row"><label>' + k + '</label><div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, pct) + '%"></div></div><span>' + pct + '%</span></div>';
+      });
+      barsHtml += "</div>";
+    }
+    let auditRows = "";
+    if (data.audit_trail_for_record && data.audit_trail_for_record.length) {
+      auditRows = "<table class='audit'><thead><tr><th>seq</th><th>kind</th><th>collection</th><th>backend</th><th>detail (summary)</th></tr></thead><tbody>";
+      data.audit_trail_for_record.forEach((ev) => {
+        const det = JSON.stringify(ev.detail || {}).slice(0, 120);
+        auditRows += "<tr><td>" + (ev.sequence ?? "") + "</td><td>" + ev.kind + "</td><td>" + (ev.collection || "") + "</td><td>" + (ev.backend_id || "") + "</td><td>" + det + "</td></tr>";
+      });
+      auditRows += "</tbody></table>";
+    }
+    traceVisual.innerHTML =
+      '<div class="grid2">' +
+      '<div><div class="trace-section"><h3>Classification</h3><p class="muted">' + (c && c.interpretation ? c.interpretation : "") + "</p>" + barsHtml + "</div></div>" +
+      '<div><div class="trace-section"><h3>Routing</h3><p class="muted">' + (r && r.interpretation ? r.interpretation : "") + "</p>" +
+      "<pre class='out' style='max-height:180px'>" + JSON.stringify(r && r.targets ? r.targets : [], null, 2) + "</pre></div></div></div>" +
+      '<div class="trace-section"><h3>Storage</h3><p class="kpi">' + (s && s.interpretation ? s.interpretation : "") + "</p>" +
+      "<p>Backends written: <strong>" + JSON.stringify(s && s.backend_ids_written ? s.backend_ids_written : []) + "</strong> · audit seq: <strong>" + (s && s.audit_sequence_after_ingest) + "</strong></p></div>" +
+      '<div class="trace-section"><h3>Audit trail (this record)</h3>' + (auditRows || "<p class='muted'>No matching events in tail scan window.</p>") + "</div>";
+  }
+
+  document.getElementById("btnSnapshot").onclick = () => loadSnapshot().catch((e) => { snapshotOut.textContent = String(e); });
+
+  document.getElementById("btnTrace").onclick = async () => {
+    let payload;
+    try { payload = JSON.parse(document.getElementById("tracePayload").value); }
+    catch (e) { traceJson.textContent = "Invalid JSON: " + e; return; }
+    traceVisual.innerHTML = "<p class='muted'>Running…</p>";
+    const { data, status } = await request("/v1/debug/trace-ingest", "POST", {
+      collection: document.getElementById("traceCollection").value,
+      tenant_id: document.getElementById("traceTenant").value,
+      payload
+    });
+    if (status >= 400) { traceJson.textContent = JSON.stringify(data, null, 2); traceVisual.innerHTML = ""; return; }
+    renderTrace(data);
+  };
+
+  const samples = {
+    relational: {
+      collection: "demo_orders",
+      payload: { order_id: "o-100", user_id: 7, amount: 49.5, status: "paid" }
+    },
+    nested: {
+      collection: "demo_docs",
+      payload: { title: "Q4", sections: [{ h: "A", body: "text" }, { h: "B", nested: { x: 1 } }] }
+    },
+    flat_report: {
+      collection: "demo_reports",
+      payload: { report_id: 3, title: "Weekly", score: 0.92, status: "published" }
+    }
+  };
+  document.querySelectorAll("[data-sample]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = samples[btn.dataset.sample];
+      if (!s) return;
+      document.getElementById("traceCollection").value = s.collection;
+      document.getElementById("tracePayload").value = JSON.stringify(s.payload, null, 2);
+    });
+  });
+
+  async function initScenarios() {
+    const { data } = await request("/v1/debug/scenarios");
+    const sel = document.getElementById("scenario");
+    for (const name of data.scenarios || []) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+  }
+
+  document.getElementById("populateBtn").onclick = async () => {
+    const res = await request("/v1/debug/populate", "POST", {
+      scenario: document.getElementById("scenario").value,
+      tenant_id: document.getElementById("tenant").value
+    });
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+  document.getElementById("runBtn").onclick = async () => {
+    const res = await request("/v1/debug/run", "POST", {
+      scenario: document.getElementById("scenario").value,
+      tenant_id: document.getElementById("tenant").value
+    });
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+  document.getElementById("queryBtn").onclick = async () => {
+    const res = await request("/v1/query", "POST", {
+      sql: document.getElementById("sql").value,
+      tenant_id: document.getElementById("tenant").value,
+      max_rows: 200
+    });
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+  document.getElementById("healthBtn").onclick = async () => {
+    const res = await request("/v1/health");
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+  document.getElementById("auditTailBtn").onclick = async () => {
+    const t = document.getElementById("tenant").value;
+    const res = await request("/v1/audit/tail?after_sequence=0&limit=20&tenant_id=" + encodeURIComponent(t));
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+  document.getElementById("auditVerifyBtn").onclick = async () => {
+    const res = await request("/v1/audit/verify");
+    e2eOut.textContent = JSON.stringify(res, null, 2);
+    setRaw(res);
+  };
+
+  const btnRelRun = document.getElementById("btnRelRun");
+  if (btnRelRun) {
+    btnRelRun.onclick = async () => {
+      relOut.textContent = "Running…";
+      const res = await request("/v1/debug/customer-estimate/run", "POST", {
+        tenant_id: document.getElementById("relTenant").value
+      });
+      relOut.textContent = JSON.stringify(res.data, null, 2);
+      setRaw(res);
+      const intent = res.data && res.data.buffered_pending_intent_id;
+      if (intent) document.getElementById("relIntent").value = intent;
+    };
+  }
+  const btnRelCommit = document.getElementById("btnRelCommit");
+  if (btnRelCommit) {
+    btnRelCommit.onclick = async () => {
+      relCommitOut.textContent = "…";
+      const res = await request("/v1/debug/customer-estimate/commit", "POST", {
+        tenant_id: document.getElementById("relTenant").value,
+        intent_id: document.getElementById("relIntent").value.trim(),
+        resolved_customer_id: document.getElementById("relCust").value.trim()
+      });
+      relCommitOut.textContent = JSON.stringify(res.data, null, 2);
+      setRaw(res);
+    };
+  }
+
+  initScenarios().then(loadSnapshot).catch((e) => { snapshotOut.textContent = String(e); });
+</script>

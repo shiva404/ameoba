@@ -119,3 +119,28 @@ async def test_health_check(kernel: AmeobaKernel):
     assert health["kernel"] == "ok"
     assert "duckdb-embedded" in health["backends"]
     assert health["backends"]["duckdb-embedded"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_duckdb_schema_evolution_adds_columns(kernel: AmeobaKernel):
+    """Second ingest with new keys should ALTER TABLE ADD COLUMN and insert."""
+    await kernel.ingest(
+        DataRecord(
+            collection="evolve_widgets",
+            payload={"sku": "A1", "price": 10},
+        ),
+    )
+    await kernel.ingest(
+        DataRecord(
+            collection="evolve_widgets",
+            payload={"sku": "A2", "price": 20, "warranty_years": 2},
+        ),
+    )
+    result = await kernel.query(
+        "SELECT sku, price, warranty_years FROM evolve_widgets ORDER BY sku"
+    )
+    assert result.row_count >= 2
+    by_sku = {row[0]: row for row in result.rows}
+    w_idx = result.columns.index("warranty_years")
+    assert by_sku["A1"][w_idx] is None or by_sku["A1"][w_idx] == ""
+    assert str(by_sku["A2"][w_idx]) == "2"

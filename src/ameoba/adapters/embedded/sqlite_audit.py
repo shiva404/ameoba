@@ -115,6 +115,13 @@ class SQLiteAuditSink:
             raise RuntimeError("SQLiteAuditSink is not open — call await sink.open() first")
         return self._db
 
+    async def iter_events_ordered(self) -> AsyncIterator[AuditEvent]:
+        """Yield all persisted events in sequence order (for ledger hydration)."""
+        db = self._assert_open()
+        async with db.execute("SELECT * FROM audit_log ORDER BY sequence ASC") as cursor:
+            async for row in cursor:
+                yield _row_to_event(row)
+
     async def append(self, event: AuditEvent) -> AuditEvent:
         """Persist an enriched event (sequence + hashes must already be set)."""
         db = self._assert_open()
@@ -242,6 +249,21 @@ class SQLiteAuditSink:
             async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
                 row = await cur.fetchone()
         return row[0] if row else 0
+
+    async def count_by_kind(self, *, tenant_id: str | None = None) -> dict[str, int]:
+        """Event counts grouped by ``kind`` (for catalog / ops dashboards)."""
+        db = self._assert_open()
+        if tenant_id:
+            sql = "SELECT kind, COUNT(*) FROM audit_log WHERE tenant_id = ? GROUP BY kind"
+            params: tuple = (tenant_id,)
+        else:
+            sql = "SELECT kind, COUNT(*) FROM audit_log GROUP BY kind"
+            params = ()
+        out: dict[str, int] = {}
+        async with db.execute(sql, params) as cur:
+            async for row in cur:
+                out[str(row[0])] = int(row[1])
+        return out
 
 
 def _row_to_event(row: aiosqlite.Row) -> AuditEvent:

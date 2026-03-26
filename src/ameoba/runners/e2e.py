@@ -44,17 +44,19 @@ def _mixed_small_dataset(tenant_id: str) -> list[DataRecord]:
         )
         for i in range(1, 41)
     ]
+    # Flat, tabular shape so classification routes to DuckDB (relational).
+    # Deep/nested payloads classify as document; embedded topology has no
+    # document store, so no SQL table would exist for COUNT checks.
     reports = [
         DataRecord(
             collection="reports",
             tenant_id=tenant_id,
             payload={
+                "report_id": i,
                 "title": f"report-{i}",
-                "metadata": {"source": "synthetic", "index": i},
-                "sections": [
-                    {"heading": "summary", "score": i},
-                    {"heading": "details", "values": [i, i + 1, i + 2]},
-                ],
+                "source": "synthetic",
+                "score": float(i),
+                "status": "draft" if i % 2 else "published",
             },
         )
         for i in range(1, 8)
@@ -155,16 +157,20 @@ async def run_scenario(
         ]
 
     for sql in queries:
-        result = await kernel.query(sql, tenant_id=tenant_id, agent_id=agent_id)
-        checks.append(
-            {
-                "sql": sql,
-                "row_count": result.row_count,
-                "execution_ms": round(result.execution_ms, 2),
-                "backend_ids_used": result.backend_ids_used,
-                "sample_rows": result.rows[:5],
-            }
-        )
+        try:
+            result = await kernel.query(sql, tenant_id=tenant_id, agent_id=agent_id)
+            checks.append(
+                {
+                    "sql": sql,
+                    "ok": True,
+                    "row_count": result.row_count,
+                    "execution_ms": round(result.execution_ms, 2),
+                    "backend_ids_used": result.backend_ids_used,
+                    "sample_rows": result.rows[:5],
+                }
+            )
+        except Exception as exc:
+            checks.append({"sql": sql, "ok": False, "error": str(exc)})
 
     audit_ok, audit_detail = await kernel.audit_verify()
     health = await kernel.health()

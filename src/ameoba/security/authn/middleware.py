@@ -50,7 +50,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Inject tenant context for structured logging
         if principal:
-            import structlog
             structlog.contextvars.bind_contextvars(
                 agent_id=principal.agent_id,
                 tenant_id=principal.tenant_id,

@@ -20,9 +20,18 @@ from typing import Any
 
 import structlog
 
+from ameoba.adapters.embedded.duckdb_store import DuckDBStore, _safe_table_name
+from ameoba.adapters.embedded.local_blob import LocalBlobStore
 from ameoba.audit.ledger import AuditLedger
 from ameoba.config import Settings
 from ameoba.domain.audit import AuditEventKind
+from ameoba.domain.catalog import (
+    CatalogAuditKindCount,
+    CatalogBlobStats,
+    CatalogCollectionEntry,
+    CatalogSnapshot,
+    CatalogStagingGroup,
+)
 from ameoba.domain.query import QueryResult
 from ameoba.domain.record import ClassificationVector, DataRecord
 from ameoba.domain.routing import BackendStatus, RoutingDecision
@@ -106,6 +115,7 @@ class AmeobaKernel:
         audit_sink = SQLiteAuditSink(path=cfg.sqlite_audit_path)
         await audit_sink.open()
         self.audit_ledger = AuditLedger(sink=audit_sink)
+        await self.audit_ledger.hydrate()
 
         # 2. DuckDB relational store
         from ameoba.adapters.embedded.duckdb_store import DuckDBStore
@@ -237,6 +247,7 @@ class AmeobaKernel:
         # --- 4. Write to backends ---
         backend_ids: list[str] = []
         payload_dict = _record_to_storage_dict(record)
+        staged_in_loop = False
 
         for target in routing.targets:
             backend = self.topology.get_backend(target.backend_id)
@@ -257,6 +268,7 @@ class AmeobaKernel:
                     collection=target.collection,
                     payload=payload_dict,
                 )
+                staged_in_loop = True
                 logger.warning(
                     "kernel_backend_unavailable_staged",
                     backend_id=target.backend_id,
@@ -296,8 +308,40 @@ class AmeobaKernel:
                         collection=target.collection,
                         payload=payload_dict,
                     )
+                    staged_in_loop = True
                 else:
                     raise
+
+        # No backend accepted the record (e.g. empty routing) — stage for DuckDB flush
+        if (
+            not backend_ids
+            and not staged_in_loop
+            and self.staging_buffer is not None
+            and self.topology.get_backend(DuckDBStore.BACKEND_ID) is not None
+        ):
+            await self.staging_buffer.enqueue(
+                record_id=record.id,
+                backend_id=DuckDBStore.BACKEND_ID,
+                collection=record.collection,
+                payload=payload_dict,
+            )
+            await self.audit_ledger.record(  # type: ignore[union-attr]
+                kind=AuditEventKind.STAGING_ENQUEUED,
+                agent_id=agent_id or record.agent_id,
+                tenant_id=record.tenant_id,
+                record_id=record.id,
+                collection=record.collection,
+                backend_id=DuckDBStore.BACKEND_ID,
+                detail={
+                    "reason": "no_routing_target_or_write_path",
+                    "primary_category": vector.primary_category.value,
+                },
+            )
+            logger.warning(
+                "kernel_unrouted_staged_to_duckdb",
+                record_id=str(record.id),
+                collection=record.collection,
+            )
 
         audit_seq = self.audit_ledger.sequence  # type: ignore[union-attr]
 
@@ -398,6 +442,120 @@ class AmeobaKernel:
             if count:
                 results[desc.id] = count
         return results
+
+    async def catalog_snapshot(
+        self,
+        *,
+        tenant_id: str = "default",
+        blob_max_files: int = 5000,
+        blob_sample_limit: int = 100,
+    ) -> CatalogSnapshot:
+        """Aggregate schema registry, DuckDB tables, staging, blobs, and audit counts."""
+        self._assert_started()
+
+        backends_meta: list[dict[str, Any]] = []
+        for desc, _ in self.topology.list_backends():
+            backends_meta.append(
+                {
+                    "id": desc.id,
+                    "display_name": desc.display_name,
+                    "tier": desc.tier.value,
+                    "supported_categories": list(desc.supported_categories),
+                }
+            )
+
+        duck = self.topology.get_backend(DuckDBStore.BACKEND_ID)
+        user_tables: list[str] = []
+        if duck is not None and hasattr(duck, "list_user_tables"):
+            user_tables = await duck.list_user_tables()  # type: ignore[union-attr]
+
+        entries_by_table: dict[str, dict[str, Any]] = {}
+        for t in user_tables:
+            rc = 0
+            if duck is not None and hasattr(duck, "count_rows_tenant"):
+                rc = await duck.count_rows_tenant(t, tenant_id=tenant_id)  # type: ignore[union-attr]
+            entries_by_table[t] = {
+                "duckdb_table": t,
+                "schema_collection_names": [],
+                "row_count": rc,
+                "latest_schema_version": None,
+                "inferred_category": None,
+            }
+
+        if self.schema_registry is not None:
+            for coll in await self.schema_registry.list_collections():
+                sn = _safe_table_name(coll)
+                latest = await self.schema_registry.get_latest(coll)
+                if sn not in entries_by_table:
+                    entries_by_table[sn] = {
+                        "duckdb_table": sn,
+                        "schema_collection_names": [],
+                        "row_count": 0,
+                        "latest_schema_version": None,
+                        "inferred_category": None,
+                    }
+                entry = entries_by_table[sn]
+                if coll not in entry["schema_collection_names"]:
+                    entry["schema_collection_names"].append(coll)
+                if latest is not None:
+                    prev_v = entry["latest_schema_version"]
+                    if prev_v is None or latest.version_number > prev_v:
+                        entry["latest_schema_version"] = latest.version_number
+                        entry["inferred_category"] = latest.inferred_category
+
+        collections = sorted(
+            (
+                CatalogCollectionEntry(
+                    duckdb_table=e["duckdb_table"],
+                    schema_collection_names=sorted(e["schema_collection_names"]),
+                    row_count=int(e["row_count"]),
+                    latest_schema_version=e["latest_schema_version"],
+                    inferred_category=e["inferred_category"],
+                )
+                for e in entries_by_table.values()
+            ),
+            key=lambda c: c.duckdb_table,
+        )
+
+        staging_groups: list[CatalogStagingGroup] = []
+        staging_total = 0
+        if self.staging_buffer is not None:
+            staging_total = await self.staging_buffer.pending_count()
+            for row in await self.staging_buffer.grouped_pending():
+                staging_groups.append(CatalogStagingGroup(**row))
+
+        blobs: CatalogBlobStats | None = None
+        blob_be = self.topology.get_backend(LocalBlobStore.BACKEND_ID)
+        if blob_be is not None and hasattr(blob_be, "catalog_stats"):
+            raw = await blob_be.catalog_stats(  # type: ignore[union-attr]
+                max_files=blob_max_files,
+                sample_limit=blob_sample_limit,
+            )
+            blobs = CatalogBlobStats(**raw)
+
+        audit_by_kind: list[CatalogAuditKindCount] = []
+        audit_total = 0
+        if self.audit_ledger is not None:
+            counts = await self.audit_ledger.count_by_kind(tenant_id=tenant_id)
+            audit_by_kind = [
+                CatalogAuditKindCount(kind=k, count=v)
+                for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+            ]
+            sink = getattr(self.audit_ledger, "_sink", None)
+            cnt_fn = getattr(sink, "count", None)
+            if callable(cnt_fn):
+                audit_total = await cnt_fn(tenant_id=tenant_id)  # type: ignore[misc]
+
+        return CatalogSnapshot(
+            tenant_id=tenant_id,
+            collections=collections,
+            staging_groups=staging_groups,
+            staging_pending_total=staging_total,
+            blobs=blobs,
+            audit_events_by_kind=audit_by_kind,
+            audit_event_total=audit_total,
+            backends=backends_meta,
+        )
 
     # ------------------------------------------------------------------
     # Helpers

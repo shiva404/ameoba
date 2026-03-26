@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ameoba.api.http.dependencies import KernelDep
 
@@ -25,10 +25,15 @@ router = APIRouter(prefix="/v1/schema", tags=["schema"])
 
 
 class SchemaVersionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     collection: str
     version_number: int
     compatibility: str
-    schema_json: dict[str, Any]
+    definition: dict[str, Any] = Field(
+        serialization_alias="schema_json",
+        description="JSON Schema document for this version",
+    )
     registered_at: str
     record_count: int
     field_count: int
@@ -69,7 +74,11 @@ async def list_schema_collections(kernel: KernelDep) -> CollectionListResponse:
     return CollectionListResponse(collections=collections)
 
 
-@router.get("/{collection}", response_model=SchemaVersionResponse)
+@router.get(
+    "/{collection}",
+    response_model=SchemaVersionResponse,
+    response_model_by_alias=True,
+)
 async def get_latest_schema(collection: str, kernel: KernelDep) -> SchemaVersionResponse:
     """Get the latest schema version for a collection."""
     if kernel.schema_registry is None:
@@ -82,7 +91,11 @@ async def get_latest_schema(collection: str, kernel: KernelDep) -> SchemaVersion
     return _to_response(version)
 
 
-@router.get("/{collection}/versions", response_model=SchemaVersionListResponse)
+@router.get(
+    "/{collection}/versions",
+    response_model=SchemaVersionListResponse,
+    response_model_by_alias=True,
+)
 async def list_schema_versions(collection: str, kernel: KernelDep) -> SchemaVersionListResponse:
     """Get all schema versions for a collection (oldest first)."""
     if kernel.schema_registry is None:
@@ -95,7 +108,12 @@ async def list_schema_versions(collection: str, kernel: KernelDep) -> SchemaVers
     )
 
 
-@router.post("/{collection}/infer", response_model=SchemaVersionResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{collection}/infer",
+    response_model=SchemaVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+    response_model_by_alias=True,
+)
 async def infer_and_register_schema(
     collection: str,
     body: InferRequest,
@@ -123,7 +141,7 @@ def _to_response(version: Any) -> SchemaVersionResponse:
         collection=version.collection,
         version_number=version.version_number,
         compatibility=version.compatibility.value,
-        schema_json=version.json_schema,
+        definition=version.json_schema,
         registered_at=version.created_at.isoformat(),
         record_count=version.record_count_at_inference,
         field_count=version.field_count,

@@ -1,0 +1,136 @@
+{% extends "debug/base.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block body %}
+<div class="wrap">
+  <header>
+    <div class="badge">Live platform</div>
+    <h1>Ameoba — data fabric demo</h1>
+    <p>
+      End-to-end view for investors: <strong>ingestion → multi-signal classification → topology-aware routing
+      → durable storage → cryptographic audit chain</strong>. All calls below hit the same kernel as production APIs.
+      <a href="/debug/catalog">Data catalog</a> lists persisted collections, staging, and blobs.
+    </p>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button type="button" data-tab="overview" class="active">Overview</button>
+    <button type="button" data-tab="pipeline">Pipeline lab</button>
+    <button type="button" data-tab="relations">Customer → estimate</button>
+    <button type="button" data-tab="e2e">Bulk scenarios</button>
+    <button type="button" data-tab="raw">Raw JSON</button>
+  </nav>
+
+  <section id="panel-overview" class="panel active">
+    <div class="card">
+      <h2>Platform snapshot</h2>
+      <p class="muted">Health, registered backends, audit Merkle tip, and the six-stage story.</p>
+      <div class="row" style="margin-bottom:12px">
+        <button type="button" class="ctl primary" id="btnSnapshot">Refresh snapshot</button>
+      </div>
+      <div id="snapshotPipeline" class="pipeline"></div>
+      <pre class="out" id="snapshotOut">Loading…</pre>
+    </div>
+  </section>
+
+  <section id="panel-pipeline" class="panel">
+    <div class="card">
+      <h2>Trace one record</h2>
+      <p class="muted">Runs <code>POST /v1/debug/trace-ingest</code> — real classify, route, write, and audit events for this payload.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label>Collection</label>
+        <input id="traceCollection" value="demo_orders" style="width:200px" />
+        <label>Tenant</label>
+        <input id="traceTenant" value="default" style="width:120px" />
+      </div>
+      <label class="muted">Payload (JSON)</label>
+      <textarea id="tracePayload">{{ default_trace_payload | e }}</textarea>
+      <div class="row" style="margin-top:12px">
+        <button type="button" class="ctl ghost" data-sample="relational">Sample: relational row</button>
+        <button type="button" class="ctl ghost" data-sample="nested">Sample: nested (document-leaning)</button>
+        <button type="button" class="ctl ghost" data-sample="flat_report">Sample: flat report row</button>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button type="button" class="ctl primary" id="btnTrace">Run pipeline trace</button>
+      </div>
+      <div id="traceVisual"></div>
+      <pre class="out" id="traceJson" style="margin-top:14px; max-height:320px">—</pre>
+    </div>
+  </section>
+
+  <section id="panel-relations" class="panel">
+    <div class="card">
+      <h2>Schema evolution &amp; relationship demo</h2>
+      <p class="muted">
+        Persists <code>demo_customers</code> (v1 then evolved columns), resolves by email, writes <code>demo_estimates</code>
+        with <code>customer_id</code>. When two customers share a name, a follow-up estimate intent is
+        <strong>buffered</strong> in <code>demo_buffered_estimates</code> until you commit with an explicit
+        <code>customer_id</code>.
+      </p>
+      <div class="row" style="margin-bottom:12px">
+        <label>Tenant</label>
+        <input id="relTenant" value="default" style="width:120px" />
+        <button type="button" class="ctl primary" id="btnRelRun">Run full demo</button>
+      </div>
+      <pre class="out" id="relOut" style="max-height:280px">Run the demo to see steps…</pre>
+    </div>
+    <div class="card">
+      <h2>Commit buffered intent</h2>
+      <p class="muted">Paste <code>buffered_pending_intent_id</code> from the demo response and pick the correct <code>customer_id</code> from <code>candidates</code>.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label>Intent id</label>
+        <input id="relIntent" style="flex:1; min-width:220px" placeholder="uuid from buffered step" />
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <label>Customer id</label>
+        <input id="relCust" style="flex:1; min-width:220px" placeholder="e.g. cust-jane-1" />
+        <button type="button" class="ctl primary" id="btnRelCommit">Commit to estimates</button>
+      </div>
+      <pre class="out" id="relCommitOut">—</pre>
+    </div>
+  </section>
+
+  <section id="panel-e2e" class="panel">
+    <div class="card">
+      <h2>Bulk scenarios</h2>
+      <div class="row">
+        <label>Scenario</label>
+        <select id="scenario"></select>
+        <label>Tenant</label>
+        <input id="tenant" value="default" />
+        <button type="button" class="ctl" id="populateBtn">Populate</button>
+        <button type="button" class="ctl primary" id="runBtn">Run checks + SQL</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>SQL</h2>
+      <div class="row">
+        <input id="sql" style="flex:1; min-width:280px" value="SELECT * FROM users LIMIT 10" />
+        <button type="button" class="ctl" id="queryBtn">Query</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Audit & health</h2>
+      <div class="row">
+        <button type="button" class="ctl" id="healthBtn">Health</button>
+        <button type="button" class="ctl" id="auditTailBtn">Audit tail (20)</button>
+        <button type="button" class="ctl" id="auditVerifyBtn">Verify chain</button>
+      </div>
+      <pre class="out" id="e2eOut">—</pre>
+    </div>
+  </section>
+
+  <section id="panel-raw" class="panel">
+    <div class="card">
+      <h2>Raw API responses</h2>
+      <p class="muted">Last JSON from the active tab actions.</p>
+      <pre class="out" id="rawOut">—</pre>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% include "debug/partials/demo_scripts.html" %}
+{% endblock %}

@@ -29,12 +29,18 @@ def configure_logging(
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
 
-    shared_processors: list[structlog.types.Processor] = [
+    timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
+    stack_renderer = structlog.processors.StackInfoRenderer()
+
+    # stdlib-backed factory is required for add_logger_name / add_log_level
+    # (PrintLogger has no ``.name`` and breaks add_logger_name).
+    structlog_chain: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
+        structlog.stdlib.filter_by_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso", utc=True),
-        structlog.processors.StackInfoRenderer(),
+        timestamper,
+        stack_renderer,
     ]
 
     if fmt == "json":
@@ -44,21 +50,30 @@ def configure_logging(
 
     structlog.configure(
         processors=[
-            *shared_processors,
+            *structlog_chain,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(log_level),
+        wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
+    # Third-party stdlib logs (httpx, etc.) skip structlog_chain; they must not
+    # run filter_by_level with logger=None on the ProcessorFormatter path.
+    foreign_pre_chain: list[structlog.types.Processor] = [
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        timestamper,
+        stack_renderer,
+    ]
+
     # Also configure standard library logging so third-party libs are captured.
     formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=foreign_pre_chain,
         processors=[
             structlog.stdlib.ExtraAdder(),
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            *shared_processors,
             renderer,
         ],
     )

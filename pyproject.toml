@@ -31,6 +31,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "httpx>=0.27",
     "orjson>=3.10",
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -96,6 +97,9 @@ ameoba = "ameoba.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ameoba"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/ameoba/api/http/templates" = "ameoba/api/http/templates"
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,82 @@
+<style>
+  :root {
+    --bg: #07090d;
+    --card: #0f1419;
+    --border: #2d3748;
+    --text: #e8eef5;
+    --muted: #8b9cb3;
+    --accent: #3ed0c9;
+    --accent2: #c084fc;
+    --warn: #fbbf24;
+    --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: Outfit, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 10% -20%, rgba(62, 208, 201, 0.12), transparent),
+      radial-gradient(ellipse 80% 60% at 100% 0%, rgba(192, 132, 252, 0.08), transparent);
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { margin-bottom: 28px; }
+  header h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.02em; }
+  header p { margin: 0; color: var(--muted); max-width: 720px; line-height: 1.55; }
+  .badge { display: inline-block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--accent); border: 1px solid var(--border); padding: 4px 10px; border-radius: 999px; margin-bottom: 12px; }
+  nav.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  nav.tabs button {
+    font-family: inherit; font-size: 0.9rem; padding: 10px 18px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--muted); cursor: pointer;
+  }
+  nav.tabs button.active { color: var(--text); border-color: var(--accent); background: rgba(62, 208, 201, 0.08); }
+  section.panel { display: none; }
+  section.panel.active { display: block; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 14px; font-size: 1.05rem; font-weight: 600; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  label { color: var(--muted); font-size: 0.85rem; }
+  input, select, textarea, button.ctl {
+    font-family: "IBM Plex Mono", monospace; font-size: 13px;
+    background: #06080c; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { width: 100%; min-height: 140px; resize: vertical; }
+  button.ctl { cursor: pointer; font-family: Outfit, sans-serif; font-weight: 600; }
+  button.primary { background: linear-gradient(135deg, rgba(62, 208, 201, 0.25), rgba(192, 132, 252, 0.2));
+    border-color: var(--accent); color: var(--text); }
+  button.ghost { background: transparent; color: var(--muted); }
+  pre.out {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+    background: #06080c; border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; overflow: auto; max-height: 480px; white-space: pre-wrap; word-break: break-word;
+  }
+  .pipeline {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px;
+  }
+  .pipe-step {
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+    background: rgba(255,255,255,0.02);
+  }
+  .pipe-step strong { display: block; color: var(--accent); font-size: 0.75rem; margin-bottom: 6px; }
+  .pipe-step span { font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
+  .bars { margin-top: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 0.8rem; }
+  .bar-row label { width: 88px; color: var(--muted); flex-shrink: 0; }
+  .bar-track { flex: 1; height: 8px; background: #1a222d; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .kpi { font-family: "IBM Plex Mono", monospace; font-size: 0.85rem; color: var(--ok); }
+  .muted { color: var(--muted); font-size: 0.88rem; }
+  .trace-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .trace-section h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--accent2); }
+  table.audit { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: "IBM Plex Mono", monospace; }
+  table.audit th, table.audit td { border: 1px solid var(--border); padding: 8px; text-align: left; }
+  table.audit th { color: var(--muted); font-weight: 500; }
+</style>

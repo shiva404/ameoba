@@ -26,6 +26,7 @@ class AuditEventKind(str, Enum):
     CLASSIFICATION = "classification"
     ROUTING = "routing"
     WRITE = "write"
+    STAGING_ENQUEUED = "staging_enqueued"
     READ = "read"
     QUERY = "query"
     DELETE = "delete"        # Logical deletes only (cryptographic erasure for GDPR)

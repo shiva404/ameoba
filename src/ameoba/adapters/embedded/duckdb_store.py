@@ -32,6 +32,9 @@ def _utcnow_iso() -> str:
 
 logger = structlog.get_logger(__name__)
 
+# Internal / system tables in the shared DuckDB file (not user entity collections).
+DUCKDB_SYSTEM_TABLES = frozenset({"schema_registry", "staging_buffer"})
+
 
 class DuckDBStore:
     """DuckDB storage backend.
@@ -141,7 +144,11 @@ class DuckDBStore:
 
         table = _safe_table_name(collection)
         await self._ensure_table(table, enriched[0])
-        await self._insert_rows(table, enriched)
+        for row in enriched:
+            await self._add_missing_columns(table, row)
+        col_order = sorted({k for r in enriched for k in r})
+        normalized = [{c: r.get(c) for c in col_order} for r in enriched]
+        await self._insert_rows(table, normalized)
 
         return record_ids
 
@@ -181,6 +188,28 @@ class DuckDBStore:
     async def list_collections(self, *, tenant_id: str = "default") -> list[str]:
         _, rows = await self._fetch("SHOW TABLES;")
         return [row[0] for row in rows]
+
+    async def list_user_tables(self) -> list[str]:
+        """Table names excluding schema_registry and staging_buffer."""
+        _, rows = await self._fetch("SHOW TABLES;")
+        return [
+            row[0]
+            for row in rows
+            if str(row[0]).lower() not in DUCKDB_SYSTEM_TABLES
+        ]
+
+    async def count_rows_tenant(self, table: str, *, tenant_id: str = "default") -> int:
+        """Row count for ``table`` scoped to ``_tenant_id``, or total if column missing."""
+        if not await self._table_exists(table):
+            return 0
+        try:
+            _, rows = await self._fetch(
+                f'SELECT COUNT(*) FROM "{table}" WHERE "_tenant_id" = ?',
+                (tenant_id,),
+            )
+        except Exception:
+            _, rows = await self._fetch(f'SELECT COUNT(*) FROM "{table}"')
+        return int(rows[0][0]) if rows else 0
 
     # ------------------------------------------------------------------
     # Helpers
@@ -243,6 +272,25 @@ class DuckDBStore:
         ddl = f"CREATE TABLE IF NOT EXISTS {table} ({col_defs});"
         await self._run(ddl)
         logger.info("duckdb_table_created", table=table)
+
+    async def _table_column_names_lower(self, table: str) -> set[str]:
+        """Lowercased column names for an existing table."""
+        # ``table`` is already normalised by ``_safe_table_name`` (alphanumeric + underscore).
+        _, rows = await self._fetch(f"SELECT name FROM pragma_table_info('{table}')")
+        return {str(r[0]).lower() for r in rows}
+
+    async def _add_missing_columns(self, table: str, row: dict[str, Any]) -> None:
+        """ALTER TABLE ADD COLUMN for keys not yet present (schema evolution)."""
+        if not await self._table_exists(table):
+            return
+        existing = await self._table_column_names_lower(table)
+        for key in row:
+            if key.lower() in existing:
+                continue
+            # New keys become VARCHAR so mixed follow-up types still fit (JSON via _serialise_value).
+            await self._run(f'ALTER TABLE {table} ADD COLUMN "{key}" VARCHAR')
+            existing.add(key.lower())
+            logger.info("duckdb_column_added", table=table, column=key)
 
     async def _insert_rows(self, table: str, rows: list[dict[str, Any]]) -> None:
         """Batch-insert rows using DuckDB's VALUES clause."""
